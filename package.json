@@ -1,0 +1,27 @@
+{
+  "name": "byteimg",
+  "version": "0.1.0",
+  "description": "Create and consume tiny image previews",
+  "main": "lib/index.js",
+  "private": true,
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": [
+    "images",
+    "small",
+    "bytes"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Q42/byteimg-js.git"
+  },
+  "author": "Tom Lokhorst",
+  "license": "MIT",
+  "dependencies": {
+    "sharp": "^0.20.4"
+  },
+  "devDependencies": {
+    "@types/sharp": "^0.17.8"
+  }
+}
