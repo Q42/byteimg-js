@@ -19,7 +19,7 @@
   "author": "Tom Lokhorst",
   "license": "MIT",
   "dependencies": {
-    "sharp": "^0.20.4"
+    "sharp": "../sharp"
   },
   "devDependencies": {
     "@types/sharp": "^0.17.8"

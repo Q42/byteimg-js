@@ -1,5 +1,9 @@
 import * as sharp from 'sharp'
 import * as fs from 'fs'
+import * as util from 'util'
+
+const fs_readFile = util.promisify(fs.readFile)
+const fs_writeFile = util.promisify(fs.writeFile)
 
 const FORMAT_VERSION = 2
 
@@ -8,12 +12,21 @@ const FORMAT_VERSION = 2
 // 3,4: original height
 // 5:   small width
 // 6:   small height
-// 7,8: header length
+// 7,8: common length
 const prefixLength = 1 + 2 + 2 + 1 + 1 + 2
 
+export interface Prefix {
+  formatVersion: number
+  originalWidth: number
+  originalHeight: number
+  smallWidth: number
+  smallHeight: number
+  commonLength: number
+}
+
 export class Byteimg {
-  common: Uint8Array
-  specific: Uint8Array
+  readonly common: Buffer
+  readonly specific: Buffer
 
   readonly formatVersion = FORMAT_VERSION
   readonly originalWidth: number
@@ -22,23 +35,24 @@ export class Byteimg {
   readonly smallHeight: number
 
   constructor (
-    common: Uint8Array,
-    specific: Uint8Array,
-    originalWidth: number,
-    originalHeight: number,
-    smallWidth: number,
-    smallHeight: number,
+    common: Buffer,
+    specific: Buffer,
+    prefix: Prefix,
   ) {
     this.common = common
     this.specific = specific
-    this.originalWidth = originalWidth
-    this.originalHeight = originalHeight
-    this.smallWidth = smallWidth
-    this.smallHeight = smallHeight
+    this.originalWidth = prefix.originalWidth
+    this.originalHeight = prefix.originalHeight
+    this.smallWidth = prefix.smallWidth
+    this.smallHeight = prefix.smallHeight
   }
 
-  async toJoinedFile(fileOut: string): Promise<string> {
-    return 'DONE'
+  toJoined(): Buffer {
+    const joined = new Buffer(this.specific.length + this.common.length)
+    joined.set(this.specific, 0)
+    joined.set(this.common, this.specific.length)
+
+    return joined
   }
 
   toImage(): Buffer {
@@ -58,13 +72,25 @@ export class Byteimg {
 
     return result
   }
+
+  async writeJoinedFile(fileOut: string): Promise<void> {
+    await fs_writeFile(fileOut, this.toJoined())
+  }
+
+  async writeSpecificFile(fileOut: string): Promise<void> {
+    await fs_writeFile(fileOut, this.specific)
+  }
+
+  async writeImageFile(fileOut: string): Promise<void> {
+    await fs_writeFile(fileOut, this.toImage())
+  }
 }
 
 export async function fromOriginal(input: string | Buffer): Promise<Byteimg> {
   const inputSharp = sharp(input)
   const {width: originalWidth, height: originalHeight} = await inputSharp.metadata()
   if (!originalWidth || !originalHeight) {
-    throw 'Can\'t extract width/height metadata from input'
+    throw 'fromOriginal: Can\'t extract width/height metadata from input'
   }
 
   const max = 24 // because this fits 3 JPEG 8x8 blocks
@@ -74,7 +100,8 @@ export async function fromOriginal(input: string | Buffer): Promise<Byteimg> {
   const jpegBuffer = await inputSharp
     .resize(smallWidth, smallHeight)
     .jpeg({
-      quality: 70
+      quality: 70,
+      optimiseCoding: false
     })
     .toBuffer()
 
@@ -90,26 +117,54 @@ export async function fromOriginal(input: string | Buffer): Promise<Byteimg> {
   const header = jpegBuffer.subarray(0, indexDA)
   const body = jpegBuffer.subarray(indexDA)
 
-  const prefixBuffer = new ArrayBuffer(prefixLength)
-  const dataView = new DataView(prefixBuffer)
-  dataView.setUint8(0, FORMAT_VERSION)
-  dataView.setUint16(1, originalWidth)
-  dataView.setUint16(3, originalHeight)
-  dataView.setUint8(5, smallWidth)
-  dataView.setUint8(6, smallHeight)
-  dataView.setUint16(7, header.length)
-  const prefixArray = new Uint8Array(prefixBuffer)
+  const prefix: Prefix = {
+    formatVersion: FORMAT_VERSION,
+    originalWidth,
+    originalHeight,
+    smallWidth,
+    smallHeight,
+    commonLength: header.length
+  }
+  const prefixBuffer = new Buffer(prefixLength)
+  prefixBuffer.writePrefix(prefix)
 
-  const specific = new Uint8Array(prefixArray.length + body.length)
-  specific.set(prefixArray, 0)
-  specific.set(body, prefixArray.length)
+  const specific = new Uint8Array(prefixBuffer.length + body.length)
+  specific.set(prefixBuffer, 0)
+  specific.set(body, prefixBuffer.length)
 
-  return new Byteimg(header, specific, originalWidth, originalHeight, smallWidth, smallHeight)
+  return new Byteimg(new Buffer(header), new Buffer(specific), prefix)
+}
+
+export async function fromJoined(input: fs.PathLike | Buffer): Promise<Byteimg> {
+  const inputBuffer =  await fs_readFile(input)
+  const prefix = inputBuffer.readPrefix()
+
+  if (prefix.commonLength > inputBuffer.length) {
+    throw `fromJoined: Input too small. Perhaps input just contains specific data? Use fromSpecific function instead`
+  }
+
+  const specific = inputBuffer.slice(0, inputBuffer.length - prefix.commonLength)
+  const common = inputBuffer.slice(inputBuffer.length - prefix.commonLength)
+
+  return new Byteimg(common, specific, prefix)
+}
+
+export async function fromSpecific(input: fs.PathLike | Buffer, common: Buffer): Promise<Byteimg> {
+  const specific =  await fs_readFile(input)
+  const prefix = specific.readPrefix()
+
+  if (common.length != prefix.commonLength) {
+    throw `fromSpecific: common length doesn't match length data stored in specific`
+  }
+
+  return new Byteimg(common, specific, prefix)
 }
 
 declare global {
   interface Buffer {
     indexOfBytes: (byte1: number, byte2: number) => number | null
+    readPrefix: () => Prefix
+    writePrefix: (prefix: Prefix) => void
   }
 }
 
@@ -122,4 +177,32 @@ Buffer.prototype.indexOfBytes = function(byte1: number, byte2: number): number |
       return i
     }
   }
+}
+
+Buffer.prototype.readPrefix = function (): Prefix {
+  const dataView = new DataView(this.buffer)
+  const formatVersion = dataView.getUint8(0)
+
+  if (formatVersion != FORMAT_VERSION) {
+    throw `fromJoined: Format version ${formatVersion} is not supported`
+  }
+
+  return {
+    formatVersion: formatVersion,
+    originalWidth: dataView.getUint16(1),
+    originalHeight: dataView.getUint16(3),
+    smallWidth: dataView.getUint8(5),
+    smallHeight: dataView.getUint8(6),
+    commonLength: dataView.getUint16(7)
+  }
+}
+
+Buffer.prototype.writePrefix = function (prefix: Prefix) {
+  const dataView = new DataView(this.buffer)
+  dataView.setUint8(0, prefix.formatVersion)
+  dataView.setUint16(1, prefix.originalWidth)
+  dataView.setUint16(3, prefix.originalHeight)
+  dataView.setUint8(5, prefix.smallWidth)
+  dataView.setUint8(6, prefix.smallHeight)
+  dataView.setUint16(7, prefix.commonLength)
 }
