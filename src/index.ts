@@ -12,7 +12,7 @@ const FORMAT_VERSION = 2
 // 3,4: original height
 // 5:   small width
 // 6:   small height
-// 7,8: common length
+// 7,8: header length
 const prefixLength = 1 + 2 + 2 + 1 + 1 + 2
 
 export interface Prefix {
@@ -21,12 +21,12 @@ export interface Prefix {
   originalHeight: number
   smallWidth: number
   smallHeight: number
-  commonLength: number
+  headerLength: number
 }
 
 export class Byteimg {
-  readonly common: Buffer
-  readonly specific: Buffer
+  readonly header: Buffer
+  readonly body: Buffer
 
   readonly formatVersion = FORMAT_VERSION
   readonly originalWidth: number
@@ -35,12 +35,12 @@ export class Byteimg {
   readonly smallHeight: number
 
   constructor (
-    common: Buffer,
-    specific: Buffer,
+    header: Buffer,
+    body: Buffer,
     prefix: Prefix,
   ) {
-    this.common = common
-    this.specific = specific
+    this.header = header
+    this.body = body
     this.originalWidth = prefix.originalWidth
     this.originalHeight = prefix.originalHeight
     this.smallWidth = prefix.smallWidth
@@ -48,9 +48,9 @@ export class Byteimg {
   }
 
   toJoined(): Buffer {
-    const joined = new Buffer(this.specific.length + this.common.length)
-    joined.set(this.specific, 0)
-    joined.set(this.common, this.specific.length)
+    const joined = new Buffer(this.body.length + this.header.length)
+    joined.set(this.body, 0)
+    joined.set(this.header, this.body.length)
 
     return joined
   }
@@ -62,23 +62,23 @@ export class Byteimg {
     dataView.setUint16(2, this.smallWidth)
     const sizeArray = new Uint8Array(sizeBuffer)
 
-    const result = new Buffer(this.common.length + this.specific.length - prefixLength)
-    result.set(this.common, 0)
-    result.set(this.specific.subarray(prefixLength), this.common.length)
+    const jpeg = new Buffer(this.header.length + this.body.length - prefixLength)
+    jpeg.set(this.header, 0)
+    jpeg.set(this.body.subarray(prefixLength), this.header.length)
 
-    const indexC0 = result.indexOfBytes(0xFF, 0xC0) // start of frame
+    const indexC0 = jpeg.indexOfBytes(0xFF, 0xC0) // start of frame
     const sizeBegin = indexC0 + 5
-    result.set(sizeArray, sizeBegin)
+    jpeg.set(sizeArray, sizeBegin)
 
-    return result
+    return jpeg
   }
 
   async writeJoinedFile(fileOut: string): Promise<void> {
     await fs_writeFile(fileOut, this.toJoined())
   }
 
-  async writeSpecificFile(fileOut: string): Promise<void> {
-    await fs_writeFile(fileOut, this.specific)
+  async writeBodyFile(fileOut: string): Promise<void> {
+    await fs_writeFile(fileOut, this.body)
   }
 
   async writeImageFile(fileOut: string): Promise<void> {
@@ -114,8 +114,8 @@ export async function fromOriginal(input: string | Buffer): Promise<Byteimg> {
   // Override size in header with all zeroes, so headers for different files are the same
   jpegBuffer.fill(0, sizeBegin, sizeEnd)
 
-  const header = jpegBuffer.subarray(0, indexDA)
-  const body = jpegBuffer.subarray(indexDA)
+  const jpegHeader = jpegBuffer.subarray(0, indexDA)
+  const jpegBody = jpegBuffer.subarray(indexDA)
 
   const prefix: Prefix = {
     formatVersion: FORMAT_VERSION,
@@ -123,41 +123,42 @@ export async function fromOriginal(input: string | Buffer): Promise<Byteimg> {
     originalHeight,
     smallWidth,
     smallHeight,
-    commonLength: header.length
+    headerLength: jpegHeader.length
   }
   const prefixBuffer = new Buffer(prefixLength)
   prefixBuffer.writePrefix(prefix)
 
-  const specific = new Uint8Array(prefixBuffer.length + body.length)
-  specific.set(prefixBuffer, 0)
-  specific.set(body, prefixBuffer.length)
+  const body = new Uint8Array(prefixBuffer.length + jpegBody.length)
+  body.set(prefixBuffer, 0)
+  body.set(jpegBody, prefixBuffer.length)
 
-  return new Byteimg(new Buffer(header), new Buffer(specific), prefix)
+  return new Byteimg(new Buffer(jpegHeader), new Buffer(body), prefix)
 }
 
 export async function fromJoined(input: fs.PathLike | Buffer): Promise<Byteimg> {
   const inputBuffer =  await fs_readFile(input)
   const prefix = inputBuffer.readPrefix()
 
-  if (prefix.commonLength > inputBuffer.length) {
-    throw `fromJoined: Input too small. Perhaps input just contains specific data? Use fromSpecific function instead`
+  if (prefix.headerLength > inputBuffer.length) {
+    throw `fromJoined: Input too small. Perhaps input just contains body data? Use fromBody function instead`
   }
 
-  const specific = inputBuffer.slice(0, inputBuffer.length - prefix.commonLength)
-  const common = inputBuffer.slice(inputBuffer.length - prefix.commonLength)
+  const body = inputBuffer.slice(0, inputBuffer.length - prefix.headerLength)
+  const header = inputBuffer.slice(inputBuffer.length - prefix.headerLength)
 
-  return new Byteimg(common, specific, prefix)
+  return new Byteimg(header, body, prefix)
 }
 
-export async function fromSpecific(input: fs.PathLike | Buffer, common: Buffer): Promise<Byteimg> {
-  const specific =  await fs_readFile(input)
-  const prefix = specific.readPrefix()
+export async function fromBody(input: fs.PathLike | Buffer, header: Buffer): Promise<Byteimg> {
+  const body =  await fs_readFile(input)
+  const prefix = body.readPrefix()
 
-  if (common.length != prefix.commonLength) {
-    throw `fromSpecific: common length doesn't match length data stored in specific`
+  console.log(header.length, prefix.headerLength)
+  if (header.length != prefix.headerLength) {
+    throw `fromBody: header length doesn't match length data stored in body`
   }
 
-  return new Byteimg(common, specific, prefix)
+  return new Byteimg(header, body, prefix)
 }
 
 declare global {
@@ -193,7 +194,7 @@ Buffer.prototype.readPrefix = function (): Prefix {
     originalHeight: dataView.getUint16(3),
     smallWidth: dataView.getUint8(5),
     smallHeight: dataView.getUint8(6),
-    commonLength: dataView.getUint16(7)
+    headerLength: dataView.getUint16(7)
   }
 }
 
@@ -204,5 +205,5 @@ Buffer.prototype.writePrefix = function (prefix: Prefix) {
   dataView.setUint16(3, prefix.originalHeight)
   dataView.setUint8(5, prefix.smallWidth)
   dataView.setUint8(6, prefix.smallHeight)
-  dataView.setUint16(7, prefix.commonLength)
+  dataView.setUint16(7, prefix.headerLength)
 }
