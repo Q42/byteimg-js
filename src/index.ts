@@ -207,3 +207,10 @@ Buffer.prototype.writePrefix = function (prefix: Prefix) {
   dataView.setUint8(6, prefix.smallHeight)
   dataView.setUint16(7, prefix.headerLength)
 }
+
+// This option is missing from @types/sharp
+declare module "sharp" {
+  interface JpegOptions {
+    optimiseCoding?: boolean;
+  }
+}
