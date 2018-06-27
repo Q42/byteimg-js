@@ -19,7 +19,7 @@
   "author": "Tom Lokhorst",
   "license": "MIT",
   "dependencies": {
-    "sharp": "https://github.com/lovell/sharp#master"
+    "sharp": "^0.20.5"
   },
   "devDependencies": {
     "@types/sharp": "^0.17.8"
