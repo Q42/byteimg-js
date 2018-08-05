@@ -14,7 +14,7 @@ console.log('body 1', alice.body)
 console.log('body 2', bob.body)
 
 // Save joined file for later use
-await alice.writeJoinedFile('alice.byteimg')
+await alice.writeByteimgFile('alice.byteimg')
 
 // Recreate small image
 const imageBuffer = alice.toImage()
@@ -30,6 +30,7 @@ byte | description
 3,4    original height
 5      small width
 6      small height
-7,8    header length
+7,8    header byte count
+9,10   body byte count
 [rest] JPEG body
 ```

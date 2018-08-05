@@ -7,13 +7,16 @@ const fs_writeFile = util.promisify(fs.writeFile)
 
 const FORMAT_VERSION = 2
 
-// 0:   format version 
-// 1,2: original width
-// 3,4: original height
-// 5:   small width
-// 6:   small height
-// 7,8: header length
-const prefixLength = 1 + 2 + 2 + 1 + 1 + 2
+// byte | description
+// ------------------
+// 0      format version
+// 1,2    original width
+// 3,4    original height
+// 5      small width
+// 6      small height
+// 7,8    header byte count
+// 9,10   body byte count
+const prefixLength = 1 + 2 + 2 + 1 + 1 + 2 + 2
 
 export interface Prefix {
   formatVersion: number
@@ -21,7 +24,8 @@ export interface Prefix {
   originalHeight: number
   smallWidth: number
   smallHeight: number
-  headerLength: number
+  headerByteCount: number
+  bodyByteCount: number
 }
 
 export class Byteimg {
@@ -47,12 +51,12 @@ export class Byteimg {
     this.smallHeight = prefix.smallHeight
   }
 
-  toJoined(): Buffer {
-    const joined = new Buffer(this.body.length + this.header.length)
-    joined.set(this.body, 0)
-    joined.set(this.header, this.body.length)
+  toBuffer(): Buffer {
+    const buffer = new Buffer(this.body.length + this.header.length)
+    buffer.set(this.body, 0)
+    buffer.set(this.header, this.body.length)
 
-    return joined
+    return buffer
   }
 
   toImage(): Buffer {
@@ -73,8 +77,8 @@ export class Byteimg {
     return jpeg
   }
 
-  async writeJoinedFile(fileOut: string): Promise<void> {
-    await fs_writeFile(fileOut, this.toJoined())
+  async writeByteimgFile(fileOut: string): Promise<void> {
+    await fs_writeFile(fileOut, this.toBuffer())
   }
 
   async writeBodyFile(fileOut: string): Promise<void> {
@@ -100,7 +104,7 @@ export async function fromOriginal(input: string | Buffer): Promise<Byteimg> {
   const jpegBuffer = await inputSharp
     .resize(smallWidth, smallHeight)
     .jpeg({
-      quality: 70,
+      quality: 60,
       optimiseCoding: false
     })
     .toBuffer()
@@ -123,7 +127,8 @@ export async function fromOriginal(input: string | Buffer): Promise<Byteimg> {
     originalHeight,
     smallWidth,
     smallHeight,
-    headerLength: jpegHeader.length
+    headerByteCount: jpegHeader.length,
+    bodyByteCount: jpegBody.length
   }
   const prefixBuffer = new Buffer(prefixLength)
   prefixBuffer.writePrefix(prefix)
@@ -135,16 +140,22 @@ export async function fromOriginal(input: string | Buffer): Promise<Byteimg> {
   return new Byteimg(new Buffer(jpegHeader), new Buffer(body), prefix)
 }
 
-export async function fromJoined(input: fs.PathLike | Buffer): Promise<Byteimg> {
+export async function fromByteimg(input: fs.PathLike | Buffer): Promise<Byteimg> {
   const inputBuffer =  await fs_readFile(input)
   const prefix = inputBuffer.readPrefix()
+  const expectedByteCount = prefixLength + prefix.bodyByteCount + prefix.headerByteCount
 
-  if (prefix.headerLength > inputBuffer.length) {
-    throw `fromJoined: Input too small. Perhaps input just contains body data? Use fromBody function instead`
+  // Input validation
+  if (inputBuffer.length == prefixLength + prefix.bodyByteCount) {
+    throw `fromByteimg: Input contains only body. Use fromBody function instead`
+  }
+  if (inputBuffer.length != expectedByteCount) {
+    throw `fromByteimg: Input has wrong number of bytes. Expected ${expectedByteCount} bytes, got ${inputBuffer.length} bytes`
   }
 
-  const body = inputBuffer.slice(0, inputBuffer.length - prefix.headerLength)
-  const header = inputBuffer.slice(inputBuffer.length - prefix.headerLength)
+  // Split body and header from input
+  const body = inputBuffer.slice(0, inputBuffer.length - prefix.headerByteCount)
+  const header = inputBuffer.slice(inputBuffer.length - prefix.headerByteCount)
 
   return new Byteimg(header, body, prefix)
 }
@@ -153,8 +164,7 @@ export async function fromBody(input: fs.PathLike | Buffer, header: Buffer): Pro
   const body =  await fs_readFile(input)
   const prefix = body.readPrefix()
 
-  console.log(header.length, prefix.headerLength)
-  if (header.length != prefix.headerLength) {
+  if (header.length != prefix.headerByteCount) {
     throw `fromBody: header length doesn't match length data stored in body`
   }
 
@@ -185,7 +195,7 @@ Buffer.prototype.readPrefix = function (): Prefix {
   const formatVersion = dataView.getUint8(0)
 
   if (formatVersion != FORMAT_VERSION) {
-    throw `fromJoined: Format version ${formatVersion} is not supported`
+    throw `readPrefix: Format version ${formatVersion} is not supported`
   }
 
   return {
@@ -194,7 +204,8 @@ Buffer.prototype.readPrefix = function (): Prefix {
     originalHeight: dataView.getUint16(3),
     smallWidth: dataView.getUint8(5),
     smallHeight: dataView.getUint8(6),
-    headerLength: dataView.getUint16(7)
+    headerByteCount: dataView.getUint16(7),
+    bodyByteCount: dataView.getUint16(9)
   }
 }
 
@@ -205,7 +216,8 @@ Buffer.prototype.writePrefix = function (prefix: Prefix) {
   dataView.setUint16(3, prefix.originalHeight)
   dataView.setUint8(5, prefix.smallWidth)
   dataView.setUint8(6, prefix.smallHeight)
-  dataView.setUint16(7, prefix.headerLength)
+  dataView.setUint16(7, prefix.headerByteCount)
+  dataView.setUint16(9, prefix.bodyByteCount)
 }
 
 // This option is missing from @types/sharp

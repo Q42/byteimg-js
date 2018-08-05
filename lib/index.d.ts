@@ -6,7 +6,8 @@ export interface Prefix {
     originalHeight: number;
     smallWidth: number;
     smallHeight: number;
-    headerLength: number;
+    headerByteCount: number;
+    bodyByteCount: number;
 }
 export declare class Byteimg {
     readonly header: Buffer;
@@ -17,14 +18,14 @@ export declare class Byteimg {
     readonly smallWidth: number;
     readonly smallHeight: number;
     constructor(header: Buffer, body: Buffer, prefix: Prefix);
-    toJoined(): Buffer;
+    toBuffer(): Buffer;
     toImage(): Buffer;
-    writeJoinedFile(fileOut: string): Promise<void>;
+    writeByteimgFile(fileOut: string): Promise<void>;
     writeBodyFile(fileOut: string): Promise<void>;
     writeImageFile(fileOut: string): Promise<void>;
 }
 export declare function fromOriginal(input: string | Buffer): Promise<Byteimg>;
-export declare function fromJoined(input: fs.PathLike | Buffer): Promise<Byteimg>;
+export declare function fromByteimg(input: fs.PathLike | Buffer): Promise<Byteimg>;
 export declare function fromBody(input: fs.PathLike | Buffer, header: Buffer): Promise<Byteimg>;
 declare global  {
     interface Buffer {
