@@ -1,16 +1,18 @@
 {
   "name": "byteimg",
   "version": "0.2.0",
-  "description": "Create and consume tiny image previews",
+  "description": "Create and consume small image placeholders",
   "main": "lib/index.js",
   "private": true,
   "scripts": {
     "build": "tsc"
   },
   "keywords": [
-    "images",
+    "placeholder",
+    "image",
     "small",
-    "bytes"
+    "bytes",
+    "lqip"
   ],
   "repository": {
     "type": "git",

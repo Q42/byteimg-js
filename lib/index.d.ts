@@ -12,7 +12,7 @@ export interface Prefix {
 export declare class Byteimg {
     readonly header: Buffer;
     readonly body: Buffer;
-    readonly formatVersion: number;
+    readonly formatVersion = 2;
     readonly originalWidth: number;
     readonly originalHeight: number;
     readonly smallWidth: number;
@@ -27,9 +27,9 @@ export declare class Byteimg {
 export declare function fromOriginal(input: string | Buffer): Promise<Byteimg>;
 export declare function fromByteimg(input: fs.PathLike | Buffer): Promise<Byteimg>;
 export declare function fromBody(input: fs.PathLike | Buffer, header: Buffer): Promise<Byteimg>;
-declare global  {
+declare global {
     interface Buffer {
-        indexOfBytes: (byte1: number, byte2: number) => number | null;
+        indexOfBytes: (byte1: number, byte2: number) => number | undefined;
         readPrefix: () => Prefix;
         writePrefix: (prefix: Prefix) => void;
     }

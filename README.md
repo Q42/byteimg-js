@@ -26,11 +26,11 @@ const imageBuffer = alice.toImage()
 byte | description
 ------------------
 0      format version
-1,2    original width
-3,4    original height
+1,2    original width (big endian)
+3,4    original height (big endian)
 5      small width
 6      small height
-7,8    header byte count
-9,10   body byte count
+7,8    header byte count (big endian)
+9,10   body byte count (big endian)
 [rest] JPEG body
 ```
